@@ -1,3 +1,5 @@
+/* global SVG */
+
 class Point {
     constructor(x, y) {
         this.x = x;
@@ -16,6 +18,12 @@ const pointSize = 15;
 
 let mainPlane = SVG("#main-plane");
 
+function removeElementIfExists(id) {
+    let elem = SVG("#" + id);
+    if (elem)
+        elem.remove();
+}
+
 // eslint-disable-next-line no-unused-vars
 function createLine(event) {
     let mainPlaneElem = document.getElementById("main-plane");
@@ -23,14 +31,36 @@ function createLine(event) {
     let x = event.clientX;
     let y = event.clientY - yOffset;
     let halfHeight = 105;
-    let line = document.getElementById("line");
-    if (line)
-        line.parentNode.removeChild(line);
+    
+    removeElementIfExists("line");
+    removeElementIfExists("c-line-1");
+    removeElementIfExists("c-line-2");
 
-    line = mainPlane.line(x, y - halfHeight,
-                          x, y + halfHeight)
-                    .stroke({ width: 2, color: '#00a0f0' })
-                    .attr({ id: "line" });
+    let attributes = {
+        cx: x,
+        cy: y - halfHeight + pointSize / 2,
+        fill: "white",
+        stroke: "#189ab4",
+        "stroke-width": 1,
+        style: "cursor: pointer",
+        id: ""
+    };
+
+    attributes.id = "c-line-1";
+    let c1 = mainPlane.circle(pointSize).attr(attributes);
+    attributes.cy = y + halfHeight - pointSize / 2;
+    attributes.id = "c-line-2";
+    let c2 = mainPlane.circle(pointSize).attr(attributes);
+
+    c1.draggable();
+    c1.on('dragmove.namespace', circleOnLineDrag);
+    c2.draggable();
+    c2.on('dragmove.namespace', circleOnLineDrag);
+
+    let line = mainPlane.line(x, y - halfHeight,
+                              x, y + halfHeight)
+                        .stroke({ width: 2, color: '#00a0f0' })
+                        .attr({ id: "line" });
     
     mainPlaneElem.addEventListener("mousemove", mouseMoveLine, false);
     mainPlaneElem.addEventListener("wheel", rotateOnScroll, false);
@@ -43,32 +73,51 @@ function createLine(event) {
 
         let yTop, yBot, xTop, xBot;
         if (lineCoords[0][1] < lineCoords[1][1]) {
-            xTop = lineCoords[0][0];
-            yTop = lineCoords[0][1];
-            xBot = lineCoords[1][0];
-            yBot = lineCoords[1][1];
+            [xTop, yTop] = lineCoords[0];
+            [xBot, yBot] = lineCoords[1];
         }
         else {
-            xTop = lineCoords[1][0];
-            yTop = lineCoords[1][1];
-            xBot = lineCoords[0][0];
-            yBot = lineCoords[0][1];
+            [xTop, yTop] = lineCoords[1];
+            [xBot, yBot] = lineCoords[0];
         }
 
-        let xDiff = xTop - xBot;
-        let yDiff = yBot - yTop;
-        xTop = x + xDiff / 2;
-        xBot = x - xDiff / 2;
-        yTop = y - yDiff / 2;
-        yBot = y + yDiff / 2;
-        // document.getElementById("coords").innerHTML = `${xTop.toFixed(2)}, ${yTop.toFixed(2)}; ${xBot.toFixed(2)}, ${yBot.toFixed(2)}`;
-        
+        let xAvg = (xBot - xTop) / 2;
+        let yAvg = (yBot - yTop) / 2;
+        xTop = x - xAvg;
+        yTop = y - yAvg;
+        xBot = x + xAvg;
+        yBot = y + yAvg;
+
+        let c1 = SVG("#c-line-1");
+        let c2 = SVG("#c-line-2");
+
+        if (!c1) {
+            attributes.id = "c-line-1";
+            attributes.cx = xTop;
+            attributes.cy = yTop;
+            c1 = mainPlane.circle(pointSize).attr(attributes);
+        }
+        else
+            c1.move(xTop - pointSize / 2, yTop - pointSize / 2);
+
+        if (!c2) {
+            attributes.id = "c-line-2";
+            attributes.cx = xBot;
+            attributes.cy = yBot;
+            c2 = mainPlane.circle(pointSize).attr(attributes);
+        }
+        else
+            c2.move(xBot - pointSize / 2, yBot - pointSize / 2);
+
         let startPoint = circlePoints[1];
         let endPoint = circlePoints[4];
 
         let distance1 = Math.pow((startPoint.x - xTop)**2 + (startPoint.y - yTop)**2, 0.5);
         let distance2 = Math.pow((endPoint.x - xBot)**2 + (endPoint.y - yBot)**2, 0.5);
         if (distance1 < pointSize / 2 && distance2 < pointSize / 2) {
+            removeElementIfExists("c-line-1");
+            removeElementIfExists("c-line-2");
+
             line.plot(startPoint.x, startPoint.y, endPoint.x, endPoint.y);
             return;
         }
@@ -90,6 +139,10 @@ function createLine(event) {
         let newYTop = xTop * Math.sin(angle) + yTop * Math.cos(angle) + y;
         let newXBot = xBot * Math.cos(angle) - yBot * Math.sin(angle) + x;
         let newYBot = xBot * Math.sin(angle) + yBot * Math.cos(angle) + y;
+
+        if (newYTop > newYBot) {
+            [newXTop, newYTop, newXBot, newYBot] = [newXBot, newYBot, newXTop, newYTop];
+        }
         line.plot(newXTop, newYTop, newXBot, newYBot);
     }
 
@@ -97,8 +150,11 @@ function createLine(event) {
         mainPlaneElem.removeEventListener("mousemove", mouseMoveLine, false);
         mainPlaneElem.removeEventListener("wheel", rotateOnScroll, false);
         mainPlaneElem.removeEventListener("mouseup", mouseUp, false);
-        // document.getElementById("coords").innerHTML = event.clientX + ", " + event.clientY;
     }
+}
+
+function circleOnLineDrag(event) {
+    
 }
 
 // eslint-disable-next-line no-unused-vars
@@ -121,14 +177,12 @@ function onClickFrontCurve() {
 }
 
 function drawPoints(x, y, pointsLength) {
-    const strokeWidth = 1;
-
     let attributes = {
         cx: x,
         cy: y,
         fill: "white",
         stroke: "#00f0a0",
-        "stroke-width": strokeWidth,
+        "stroke-width": 1,
         style: "cursor: pointer",
         id: `c-${pointsLength}`
     };
@@ -141,26 +195,22 @@ function drawPoints(x, y, pointsLength) {
     if (bezierPoints.length == 0)
         return;
     
-    let frontPathD = `M ${circlePoints[1].x} ${circlePoints[1].y} `;
-    let point2 = `${circlePoints[2].x} ${circlePoints[2].y} `;
-    let point3 = `${circlePoints[3].x} ${circlePoints[3].y} `;
-    if (pointsLength == 3) {
-        frontPathD += "Q " + point2 + point3;
+    let frontPathD = new SVG.PathArray([
+        "M",
+        circlePoints[1].x, circlePoints[1].y,
+        "Q",
+        circlePoints[2].x, circlePoints[2].y,
+        circlePoints[3].x, circlePoints[3].y
+    ]);
+
+    if (pointsLength == 4) {
+        frontPathD[1][0] = "C";
+        frontPathD[1].push(circlePoints[4].x, circlePoints[4].y);
     }
-    else if (pointsLength == 4) {
-        let point4 = `${circlePoints[4].x} ${circlePoints[4].y}`;
-        frontPathD += "C " + point2 + point3 + point4;
-    }
-    else
+    else if (pointsLength != 3)
         return;
 
-    let frontPath = document.getElementById("frontCurve");
-    if (frontPath)
-        frontPath.parentNode.removeChild(frontPath);
-
-    let line = document.getElementById("line");
-    if (line)
-        line.parentNode.removeChild(line);
+    removeElementIfExists("frontCurve");
 
     mainPlane.path(frontPathD).stroke({ width: 2, color: '#00a0f0' })
              .fill("none").id("frontCurve");
@@ -168,48 +218,57 @@ function drawPoints(x, y, pointsLength) {
 
 function circleDrag(event) {
     const { handler, box } = event.detail;
-
     event.preventDefault();
 
     let { x, y } = box;
-
     let circleId = event.currentTarget.id;
     let circleIdx = parseInt(circleId.split("-")[1]);
 
     [x, y] = calcXY(x, y, circleIdx, box);
-
     handler.move(x, y);
+    // document.getElementById("coords").innerHTML = `${x} ${}` 
+
+    movePath(x, y, circleIdx, box, "frontCurve");
+    moveLine(x, y, circleIdx);
 
     circlePoints[circleIdx].setVals(x, y);
+}
 
-    let path = SVG("#frontCurve");
+function movePath(x, y, circleIdx, box, id) {
+    let path = SVG("#" + id);
     if (!path)
         return;
 
-    let frontPathD = path.attr("d").split(" ");
-    let x_place = 0;
+    let frontPathD = path.array();
+    let firstIdx = 0, secondIdx = 1;
 
-    if (circleIdx == 1)
-        x_place = 1;
-    else {
-        x_place = circleIdx * 2;
+    if (circleIdx != 1) {
+        firstIdx = 1;
+        secondIdx += (circleIdx - 2) * 2;
     }
 
     x += box.w / 2;
     y += box.h / 2;
+    frontPathD[firstIdx][secondIdx] = x;
+    frontPathD[firstIdx][secondIdx + 1] = y;
+    path.plot(frontPathD);
+}
 
-    frontPathD[x_place] = x;
-    frontPathD[x_place + 1] = y;
-    path.plot(frontPathD.join(" "));
-
+function moveLine(x, y, circleIdx) {
     let line = SVG("#line");
     if (!line || circleIdx == 2 || circleIdx == 3)
         return;
     
     let lineCoords = line.array();
+    let circlePoint = circlePoints[circleIdx];
     let idx = Math.floor(circleIdx / 4);
-    lineCoords[idx][0] = x;
-    lineCoords[idx][1] = y;
+
+    if (lineCoords[idx][0] != circlePoint.x
+        || lineCoords[idx][1] != circlePoint.y) {
+        return;
+    }
+    lineCoords[idx][0] = x + pointSize / 2;
+    lineCoords[idx][1] = y + pointSize / 2;
     line.plot([lineCoords[0], lineCoords[1]]);
 }
 
