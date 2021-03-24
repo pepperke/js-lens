@@ -24,18 +24,45 @@ class PathInfo {
         if (topLineIdx != -1)
             this.topLineIdx = topLineIdx;
     }
+    getSegmentPoint(segmentIdx, pointIdx) {
+        if (segmentIdx < 0 || segmentIdx >= this.pathD.length)
+            return null;
+        if (pointIdx < 0 || pointIdx >= (this.pathD[segmentIdx].length - 1) / 2) {
+            return null;
+        }
+        return new Point(this.pathD[segmentIdx][pointIdx + 1], 
+                         this.pathD[segmentIdx][pointIdx + 2]);
+    }
+    setSegmentPoint(segmentIdx, pointIdx, x, y) {
+        if (segmentIdx < 0 || segmentIdx >= this.pathD.length)
+            return;
+        if (pointIdx < 0 || pointIdx >= (this.pathD[segmentIdx].length - 1) / 2) {
+            return;
+        }
+        this.pathD[segmentIdx][pointIdx * 2 + 1] = x;
+        this.pathD[segmentIdx][pointIdx * 2 + 2] = y;
+    }
+    getSegmentLengthInPoints(segmentIdx) {
+        if (segmentIdx < 0 || segmentIdx >= this.pathD.length)
+            return -1;
+        return parseInt(this.pathD[segmentIdx].length - 1) / 2;
+    }
+    plot() {
+        let path = SVG("#" + this.id);
+        path.plot(this.pathD);
+    }
 }
 
 class LensInfo {    
     constructor(id) {
         this.id = id + "-" + LensInfo.count++;
-        this.pathInfo;
+        this.path;
         this.circles = [];
     }
     setPath(pathD, backCurveIdx, frontCurveIdx, 
             botLineIdx=-1, topLineIdx=-1) {
-        this.pathInfo = new PathInfo(this.id, pathD, backCurveIdx, 
-                                     frontCurveIdx, botLineIdx, topLineIdx);
+        this.path = new PathInfo(this.id, pathD, backCurveIdx, 
+                                 frontCurveIdx, botLineIdx, topLineIdx);
     }
     pushCircle(circle) {
         this.circles.push(circle);
@@ -101,7 +128,7 @@ function createCircle(lens, cx, cy, id) {
 
 function createPointsForLens(lens) {
     let lensId = lens.id;
-    let path = lens.pathInfo.pathD;
+    let path = lens.path.pathD;
     let cx, cy, segment, circleIdx;
 
     for (let i = 0; i < path.length; i++) {
@@ -113,7 +140,7 @@ function createPointsForLens(lens) {
             createCircle(lens, cx, cy, lensId+"-circle-"+segment + circleIdx++);
         }
         else if (path[i][0] == "C") {
-            segment = i == lens.pathInfo.backCurveIdx ? "back-" : "front-";
+            segment = i == lens.path.backCurveIdx ? "back-" : "front-";
             for (let j = 1; j < path[i].length; j += 2) {
                 cx = path[i][j];
                 cy = path[i][j + 1];
@@ -128,6 +155,13 @@ function createPointsForLens(lens) {
         }
         else if (path[i][0] == "V" && i != path.length - 1) {
             cy = path[i][1];
+            createCircle(lens, cx, cy, lensId+"-circle-"+segment + circleIdx++);
+        }
+        else if (path[i][0] == "L" && i != path.length - 1) {
+            circleIdx = 1;
+            segment = segment == "back-" ? "front-" : "back-";
+            cx = path[i][1];
+            cy = path[i][2];
             createCircle(lens, cx, cy, lensId+"-circle-"+segment + circleIdx++);
         }
     }
@@ -155,11 +189,11 @@ function createLens(event) {
 
     if (lensId == "biconvex") {
         pathD = new SVG.PathArray([
-            ['M', 30, 0],
+            ['M', 30, 1],
             ['C', -10, 70, -10, 135, 30, 200],
-            ['H', 50],
-            ['C', 90, 135, 90, 70, 50, 0],
-            ['H', 30]
+            ['L', 50, 200],
+            ['C', 90, 135, 90, 70, 50, 1],
+            ['L', 30, 1]
         ]);
         midPoint.setVals(40, 100);
         order = [1, 3, 2, 4];
@@ -171,7 +205,7 @@ function createLens(event) {
     pathCalc(pathD, xDiff, yDiff, sub);
     lens.setPath(pathD, ...order);
 
-    attr.id = lens.pathInfo.id;
+    attr.id = lens.path.id;
     createPointsForLens(lens);
     lenses.push(lens);
 
@@ -207,10 +241,6 @@ function createLens(event) {
         mainPlaneElem.removeEventListener("mousemove", mouseMoveLens, false);
         mainPlaneElem.removeEventListener("mouseup", mouseUpLens, false);
     }
-}
-
-function moveCircles(lensId) {
-    
 }
 
 // eslint-disable-next-line no-unused-vars
@@ -303,63 +333,61 @@ function moveCircles(lensId) {
 //     }
 // }
 
-
 function circleDrag(event) {
     const { handler, box } = event.detail;
     event.preventDefault();
-
     let { x, y } = box;
+    handler.move(x - pointSize / 2, y - pointSize / 2);
+    
     let circleId = event.currentTarget.id.split("-");
     let lensId = circleId[0] + "-" + circleId[1];
+    let lens = lenses.find(lens => lens.id == lensId);
+    moveAdjacent(x, y, circleId, lens);
+}
+
+function moveAdjacent(x, y, circleId, lens) {
+    let adj1CurveIdx, adj2CurveIdx, adj1PointIdx, adj2PointIdx; 
+    let curveIdx;
     let curve = circleId[3];
-    let circleIdx = parseInt(circleId[4]);
-
-    [x, y] = calcXY(x, y, circleIdx, box);
-    handler.move(x - pointSize / 2, y - pointSize / 2);
-    // document.getElementById("coords").innerHTML = `${x} ${}` 
-
-    movePath(x, y, circleIdx, box, curve);
-    moveLine(x, y, circleIdx);
-
-    circlePoints[circleIdx].setVals(x, y);
-}
-
-function movePath(x, y, circleIdx, box, id) {
-    let path = SVG("#" + id);
-    if (!path)
-        return;
-
-    let frontPathD = path.array();
-    let firstIdx = 0, secondIdx = 1;
-
-    if (circleIdx != 1) {
-        firstIdx = 1;
-        secondIdx += (circleIdx - 2) * 2;
-    }
-
-    x += box.w / 2;
-    y += box.h / 2;
-    frontPathD[firstIdx][secondIdx] = x;
-    frontPathD[firstIdx][secondIdx + 1] = y;
-    path.plot(frontPathD);
-}
-
-function moveLine(x, y, circleIdx) {
-    let line = SVG("#line");
-    if (!line || circleIdx == 2 || circleIdx == 3)
-        return;
+    let circleIdx = circleId[4];
     
-    let lineCoords = line.array();
-    let circlePoint = circlePoints[circleIdx];
-    let idx = Math.floor(circleIdx / 4);
-
-    if (lineCoords[idx][0] != circlePoint.x
-        || lineCoords[idx][1] != circlePoint.y) {
-        return;
+    if (curve == "back") {
+        curveIdx = lens.path.backCurveIdx;
+        if (circleIdx == 1) {
+            if (lens.path.topLineIdx > 0)
+                adj1CurveIdx = lens.path.topLineIdx;
+            else
+                adj1CurveIdx = lens.frontCurveIdx;
+            lens.path.setSegmentPoint(0, 0, x, y);
+        }
     }
-    lineCoords[idx][0] = x + pointSize / 2;
-    lineCoords[idx][1] = y + pointSize / 2;
-    line.plot([lineCoords[0], lineCoords[1]]);
+    else {
+        curveIdx = lens.path.frontCurveIdx;
+        if (circleIdx == 1) {
+            if (lens.path.topLineIdx > 0)
+                adj1CurveIdx = lens.path.botLineIdx;
+            else
+                adj1CurveIdx = lens.backCurveIdx;
+        }
+    }
+
+    if (circleIdx == 1) {
+        adj1PointIdx = lens.path.getSegmentLengthInPoints(adj1CurveIdx);        
+        if (adj1PointIdx < 0)
+            return;
+        adj2CurveIdx = curveIdx;
+        adj2PointIdx = circleIdx;
+    }
+    else {
+        adj1CurveIdx = curveIdx;
+        adj1PointIdx = circleIdx - 1;
+        adj2CurveIdx = -1;
+    }
+
+    lens.path.setSegmentPoint(adj1CurveIdx, adj1PointIdx - 1, x, y);
+    if (adj2CurveIdx > -1)
+        lens.path.setSegmentPoint(adj2CurveIdx, adj2PointIdx - 1, x, y);
+    lens.path.plot();
 }
 
 function calcBezierPoints(pointsLength) {
@@ -395,91 +423,4 @@ function calcBezierPoints(pointsLength) {
     else {
         return;
     }
-}
-
-function argminAndArgmax(array) {
-    let maxIdx = 0, minIdx = 0;
-    let max = array[0], min = array[0];
-    for (let i = 1; i < array.length; i++) {
-        let element = array[i];
-        if (element > max) {
-            max = element;
-            maxIdx = i;
-        }
-        else if (element < min) {
-            min = element;
-            minIdx = i;
-        }
-    }
-    return [minIdx, maxIdx];
-}
-
-function calcXY(x, y, circleIdx, box) {
-    // первое предположение: точек всегда > 2
-    // второе: третья точка не находится справа последней
-    const mainSVG = mainPlane.node;
-    let prevCircle = circleIdx - 1;
-    let nextCircle = circleIdx + 1;
-
-    let pointsLength = Object.keys(circlePoints).length;
-
-    if (circleIdx == 1) { // top
-        let nextPoint = circlePoints[nextCircle];
-        if (x < mainSVG.clientLeft)
-            x = mainSVG.clientLeft;
-        else if (box.x2 > nextPoint.x)
-            x = nextPoint.x - box.w;
-
-        if (y < mainSVG.clientTop)
-            y = mainSVG.clientTop;
-        else if (box.y2 > nextPoint.y)
-            y = nextPoint.y - box.h;
-
-        return [x, y];
-    }
-    else if (circleIdx == 2) {
-        return calcXYMiddle(x, y, box, prevCircle, nextCircle, mainSVG);
-    }
-    else if (circleIdx == 3) {
-        if (pointsLength == 3) {
-            return calcXYLast(x, y, box, prevCircle, mainSVG);
-        }
-        else {
-            return calcXYMiddle(x, y, box, prevCircle, nextCircle, mainSVG);
-        }
-    }
-    else if (circleIdx == 4) {
-        return calcXYLast(x, y, box, prevCircle, mainSVG);
-    }
-}
-
-function calcXYMiddle(x, y, box, prevCircle, nextCircle, mainSVG) {
-    let xMax = Math.max(circlePoints[1].x, circlePoints[4].x);
-    if (x < xMax)
-        x = xMax;
-    else if (box.x2 > mainSVG.clientWidth)
-        x = mainSVG.clientWidth - box.w;
-    
-    let prevPoint = circlePoints[prevCircle]
-    let nextPoint = circlePoints[nextCircle];
-    if (y < prevPoint.y + box.h)
-        y = prevPoint.y + box.h;
-    else if (y > nextPoint.y - box.h)
-        y = nextPoint.y - box.h;
-    
-    return [x, y];
-}
-
-function calcXYLast(x, y, box, prevCircle, mainSVG) {
-    let prevPoint = circlePoints[prevCircle];
-    if (x < mainSVG.clientLeft)
-        x = mainSVG.clientLeft;
-    else if (box.x2 > prevPoint.x)
-        x = prevPoint.x - box.w;
-
-    if (box.y2 > mainSVG.clientHeight)
-        y = mainSVG.clientHeight - box.h - 1;
-    else if (y < prevPoint.y + box.h)
-        y = prevPoint.y + box.h;
-    return [x, y];
 }
