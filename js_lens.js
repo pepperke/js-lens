@@ -16,70 +16,78 @@ class PathInfo {
     constructor(id, pathD, backCurveIdx,
                 frontCurveIdx, botLineIdx=-1, topLineIdx=-1) {
         this.id = id + "-path";
-        this.pathD = pathD;
         this.backCurveIdx = backCurveIdx;
         this.frontCurveIdx = frontCurveIdx;
         if (botLineIdx != -1)
             this.botLineIdx = botLineIdx;
         if (topLineIdx != -1)
             this.topLineIdx = topLineIdx;
+
+        let attr = {
+            stroke: "#00a0f0",
+            "stroke-width": 2,
+            fill: "none",
+            id: this.id
+        };
+        this.path = mainPlane.path(pathD).attr(attr);
     }
+
     getSegmentPoint(segmentIdx, pointIdx) {
-        if (segmentIdx < 0 || segmentIdx >= this.pathD.length) {
+        let pathD = this.path.array();
+        if (segmentIdx < 0 || segmentIdx >= pathD.length) {
             console.error("getSegmentPoint: wrong segment index: ", segmentIdx);
             return null;
         }
-        if (pointIdx < 1 || pointIdx >= (this.pathD[segmentIdx].length + 1) / 2) {
+        if (pointIdx < 1 || pointIdx >= (pathD[segmentIdx].length + 1) / 2) {
             console.error("getSegmentPoint: wrong point index: ", pointIdx);
             return null;
         }
-        return new Point(this.pathD[segmentIdx][pointIdx * 2 - 1],
-                         this.pathD[segmentIdx][pointIdx * 2]);
+        return new Point(pathD[segmentIdx][pointIdx * 2 - 1],
+                         pathD[segmentIdx][pointIdx * 2]);
     }
+
     setSegmentPoint(segmentIdx, pointIdx, x, y) {
-        if (segmentIdx < 0 || segmentIdx >= this.pathD.length) {
+        let pathD = this.path.array();
+        if (segmentIdx < 0 || segmentIdx >= pathD.length) {
             console.error("setSegmentPoint: wrong segment index: ", segmentIdx);
             return;
         }
-        if (pointIdx < 1 || pointIdx >= (this.pathD[segmentIdx].length + 1) / 2) {
+        if (pointIdx < 1 || pointIdx >= (pathD[segmentIdx].length + 1) / 2) {
             console.error("setSegmentPoint: wrong point index: ", pointIdx);
             return;
         }
-        this.pathD[segmentIdx][pointIdx * 2 - 1] = x;
-        this.pathD[segmentIdx][pointIdx * 2] = y;
+        pathD[segmentIdx][pointIdx * 2 - 1] = x;
+        pathD[segmentIdx][pointIdx * 2] = y;
     }
+
     getSegmentLengthInPoints(segmentIdx) {
-        if (segmentIdx < 0 || segmentIdx >= this.pathD.length) {
+        let pathD = this.path.array();
+        if (segmentIdx < 0 || segmentIdx >= pathD.length) {
             console.error("setSegmentPoint: wrong segment index: ", segmentIdx);
             return -1;
         }
-        return parseInt(this.pathD[segmentIdx].length - 1) / 2;
-    }
-    updatePathD(pathD) {
-        this.pathD = pathD;
-    }
-    plot() {
-        let path = SVG("#" + this.id);
-        path.plot(this.pathD);
+        return parseInt(pathD[segmentIdx].length - 1) / 2;
     }
 }
 
 class LensInfo {
     constructor(id) {
         this.id = id + "-" + LensInfo.count++;
-        this.path;
+        this.pathInfo;
         this.circles = [];
         this.bezierPointsBack = [];
         this.bezierPointsFront = [];
     }
-    setPath(pathD, backCurveIdx, frontCurveIdx,
+
+    createPath(pathD, backCurveIdx, frontCurveIdx,
             botLineIdx=-1, topLineIdx=-1) {
-        this.path = new PathInfo(this.id, pathD, backCurveIdx,
-                                 frontCurveIdx, botLineIdx, topLineIdx);
+        this.pathInfo = new PathInfo(this.id, pathD, backCurveIdx,
+                                     frontCurveIdx, botLineIdx, topLineIdx);
     }
+
     createPoints() {
         let lensId = this.id;
-        let pathD = this.path.pathD;
+        let pathD = this.pathInfo.path.array();
         let cx, cy, segment, circleIdx;
 
         for (let i = 0; i < pathD.length; i++) {
@@ -91,7 +99,7 @@ class LensInfo {
                 this.createCircle(cx, cy, lensId+"-circle-"+segment + circleIdx++);
             }
             else if (pathD[i][0] == "C") {
-                segment = i == this.path.backCurveIdx ? "back-" : "front-";
+                segment = i == this.pathInfo.backCurveIdx ? "back-" : "front-";
                 for (let j = 1; j < pathD[i].length; j += 2) {
                     cx = pathD[i][j];
                     cy = pathD[i][j + 1];
@@ -117,30 +125,40 @@ class LensInfo {
             }
         }
     }
+
     createCircle(cx, cy, id) {
         let attributes = {
             cx: cx,
             cy: cy,
             fill: "white",
             stroke: "#189ab4",
-            "stroke-width": 2.5,
+            "stroke-width": 2,
             style: "cursor: pointer",
             id: id
         };
         let circle = mainPlane.circle(pointSize).attr(attributes);
         circle.draggable();
-        circle.on('dragmove.namespace', circleDrag);
-        this.circles.push(circle)
+        circle.on("dragmove.namespace", circleDrag);
+        this.circles.push(circle);
     }
-    calcBezierPointsBack() {
-        if (this.path.getSegmentLengthInPoints(this.path.backCurveIdx) == 3);
-            this.bezierPointsBack = this.calcBezierPoints(this.circles.slice(0, 4));
+
+    calcBezierPoints() {
+        if (this.pathInfo.getSegmentLengthInPoints(this.pathInfo.backCurveIdx) == 3);
+            this.bezierPointsBack = this.calcBezierPts(this.circles.slice(0, 4));
+        if (this.pathInfo.getSegmentLengthInPoints(this.pathInfo.frontCurveIdx) == 3);
+            this.bezierPointsFront = this.calcBezierPts(this.circles.slice(4));
     }
-    calcBezierPointsFront() {
-        if (this.path.getSegmentLengthInPoints(this.path.frontCurveIdx) == 3);
-            this.bezierPointsFront = this.calcBezierPoints(this.circles.slice(4));
+
+    calcBezierPointsCurve(curveIdx) {
+        if (curveIdx == this.pathInfo.backCurveIdx
+            && this.pathInfo.getSegmentLengthInPoints(curveIdx) == 3)
+            this.bezierPointsBack = this.calcBezierPts(this.circles.slice(0, 4));
+        else if (curveIdx == this.pathInfo.frontCurveIdx
+            && this.pathInfo.getSegmentLengthInPoints(curveIdx) == 3)
+            this.bezierPointsFront = this.calcBezierPts(this.circles.slice(4));
     }
-    calcBezierPoints(circles) {
+
+    calcBezierPts(circles) {
         let bezierPoints = [];
         let dt = 0.01;
         for (let t = 0; t < 1; t += dt) {
@@ -183,13 +201,6 @@ function createLens(event) {
     let prevCoords = new Point();
     let pathD, lens, order;
 
-    let attr = {
-        stroke: "#00a0f0",
-        "stroke-width": 2,
-        fill: "none",
-        id: ""
-    };
-
     let lensId = event.target.id;
 
     if (lensId == "biconvex") {
@@ -204,13 +215,12 @@ function createLens(event) {
         order = [1, 3, 2, 4];
     }
     lens = new LensInfo(lensId);
-    lens.setPath(pathD, ...order);
+    lens.createPath(pathD, ...order);
 
-    attr.id = lens.path.id;
-    let path = mainPlane.path(pathD).attr(attr);
+    let path = lens.pathInfo.path;
     path.move(x - midPoint.x, y - midPoint.y);
-    lens.path.updatePathD(path.array());
     lens.createPoints();
+    lens.calcBezierPoints();
     lenses.push(lens);
 
     prevCoords.setVals(x, y);
@@ -227,7 +237,6 @@ function createLens(event) {
         let yDiff = y - prevCoords.y;
 
         path.move(x - midPoint.x, y - midPoint.y);
-        lens.path.updatePathD(path.array());
 
         prevCoords.setVals(x, y);
 
@@ -246,7 +255,6 @@ function createLens(event) {
         mainPlaneElem.removeEventListener("mouseup", mouseUpLens, false);
     }
 }
-
 
 // eslint-disable-next-line no-unused-vars
 function createLaser(event) {
@@ -323,23 +331,24 @@ function circleDrag(event) {
 }
 
 function moveAdjacent(cx, cy, circleId, lens, xDiff, yDiff) {
-    let adjCurveIdx, adjPointIdx, adjCircleIdx;
-    let curveIdx;
     let curve = circleId[3];
     let circleIdx = circleId[4];
-    let path = lens.path;
+    let pathInfo = lens.pathInfo;
+    let path = pathInfo.path;
+    let adjCurveIdx, adjPointIdx, adjCircleIdx;
+    let curveIdx;
 
-    curveIdx = curve == "back" ? path.backCurveIdx : path.frontCurveIdx;
+    curveIdx = curve == "back" ? pathInfo.backCurveIdx : pathInfo.frontCurveIdx;
 
     if (circleIdx == 1) {
         if (curve == "back") {
-            adjCurveIdx = path.topLineIdx > 0 ? path.topLineIdx : lens.frontCurveIdx;
-            path.setSegmentPoint(0, 1, cx, cy);
+            adjCurveIdx = pathInfo.topLineIdx > 0 ? pathInfo.topLineIdx : lens.frontCurveIdx;
+            pathInfo.setSegmentPoint(0, 1, cx, cy);
         }
         else {
-            adjCurveIdx = path.topLineIdx > 0 ? path.botLineIdx : lens.backCurveIdx;
+            adjCurveIdx = pathInfo.topLineIdx > 0 ? pathInfo.botLineIdx : lens.backCurveIdx;
         }
-        adjPointIdx = path.getSegmentLengthInPoints(adjCurveIdx);
+        adjPointIdx = pathInfo.getSegmentLengthInPoints(adjCurveIdx);
         if (adjPointIdx < 0) {
             console.error("adjPointIdx < 0: ", adjPointIdx);
             return;
@@ -358,8 +367,9 @@ function moveAdjacent(cx, cy, circleId, lens, xDiff, yDiff) {
         let adjCx = adjCircle.cx() + xDiff;
         let adjCy = adjCircle.cy() + yDiff;
         adjCircle.move(adjCx - pointSize / 2, adjCy - pointSize / 2);
-        path.setSegmentPoint(curveIdx, adjCircleIdx - 1, adjCx, adjCy);
+        pathInfo.setSegmentPoint(curveIdx, adjCircleIdx - 1, adjCx, adjCy);
     }
-    path.setSegmentPoint(adjCurveIdx, adjPointIdx, cx, cy);
-    path.plot();
+    pathInfo.setSegmentPoint(adjCurveIdx, adjPointIdx, cx, cy);
+    path.plot(path.array());
+    lens.calcBezierPointsCurve(curveIdx);
 }
