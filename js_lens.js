@@ -13,7 +13,7 @@ class Point {
 }
 
 class PathInfo {
-    constructor(id, pathD, backCurveIdx, 
+    constructor(id, pathD, backCurveIdx,
                 frontCurveIdx, botLineIdx=-1, topLineIdx=-1) {
         this.id = id + "-path";
         this.pathD = pathD;
@@ -55,32 +55,113 @@ class PathInfo {
         }
         return parseInt(this.pathD[segmentIdx].length - 1) / 2;
     }
+    updatePathD(pathD) {
+        this.pathD = pathD;
+    }
     plot() {
         let path = SVG("#" + this.id);
         path.plot(this.pathD);
     }
 }
 
-class LensInfo {    
+class LensInfo {
     constructor(id) {
         this.id = id + "-" + LensInfo.count++;
         this.path;
         this.circles = [];
+        this.bezierPointsBack = [];
+        this.bezierPointsFront = [];
     }
-    setPath(pathD, backCurveIdx, frontCurveIdx, 
+    setPath(pathD, backCurveIdx, frontCurveIdx,
             botLineIdx=-1, topLineIdx=-1) {
-        this.path = new PathInfo(this.id, pathD, backCurveIdx, 
+        this.path = new PathInfo(this.id, pathD, backCurveIdx,
                                  frontCurveIdx, botLineIdx, topLineIdx);
     }
-    pushCircle(circle) {
-        this.circles.push(circle);
+    createPoints() {
+        let lensId = this.id;
+        let pathD = this.path.pathD;
+        let cx, cy, segment, circleIdx;
+
+        for (let i = 0; i < pathD.length; i++) {
+            if (pathD[i][0] == "M") {
+                circleIdx = 1;
+                segment = "back-";
+                cx = pathD[i][1];
+                cy = pathD[i][2];
+                this.createCircle(cx, cy, lensId+"-circle-"+segment + circleIdx++);
+            }
+            else if (pathD[i][0] == "C") {
+                segment = i == this.path.backCurveIdx ? "back-" : "front-";
+                for (let j = 1; j < pathD[i].length; j += 2) {
+                    cx = pathD[i][j];
+                    cy = pathD[i][j + 1];
+                    this.createCircle(cx, cy, lensId+"-circle-"+segment + circleIdx++);
+                }
+            }
+            else if (pathD[i][0] == "H" && i != pathD.length - 1) {
+                circleIdx = 1;
+                segment = segment == "back-" ? "front-" : "back-";
+                cx = pathD[i][1];
+                this.createCircle(cx, cy, lensId+"-circle-"+segment + circleIdx++);
+            }
+            else if (pathD[i][0] == "V" && i != pathD.length - 1) {
+                cy = pathD[i][1];
+                this.createCircle(cx, cy, lensId+"-circle-"+segment + circleIdx++);
+            }
+            else if (pathD[i][0] == "L" && i != pathD.length - 1) {
+                circleIdx = 1;
+                segment = segment == "back-" ? "front-" : "back-";
+                cx = pathD[i][1];
+                cy = pathD[i][2];
+                this.createCircle(cx, cy, lensId+"-circle-"+segment + circleIdx++);
+            }
+        }
+    }
+    createCircle(cx, cy, id) {
+        let attributes = {
+            cx: cx,
+            cy: cy,
+            fill: "white",
+            stroke: "#189ab4",
+            "stroke-width": 2.5,
+            style: "cursor: pointer",
+            id: id
+        };
+        let circle = mainPlane.circle(pointSize).attr(attributes);
+        circle.draggable();
+        circle.on('dragmove.namespace', circleDrag);
+        this.circles.push(circle)
+    }
+    calcBezierPointsBack() {
+        if (this.path.getSegmentLengthInPoints(this.path.backCurveIdx) == 3);
+            this.bezierPointsBack = this.calcBezierPoints(this.circles.slice(0, 4));
+    }
+    calcBezierPointsFront() {
+        if (this.path.getSegmentLengthInPoints(this.path.frontCurveIdx) == 3);
+            this.bezierPointsFront = this.calcBezierPoints(this.circles.slice(4));
+    }
+    calcBezierPoints(circles) {
+        let bezierPoints = [];
+        let dt = 0.01;
+        for (let t = 0; t < 1; t += dt) {
+            let c0 = (1 - t) * (1 - t) * (1 - t);
+            let c1 = 3 * t * (1 - t) * (1 - t);
+            let c2 = 3 * t * t * (1 - t);
+            let c3 = t * t * t;
+
+            let x = c0 * circles[0].cx() + c1 * circles[1].cx()
+                    + c2 * circles[2].cx() + c3 * circles[3].cx();
+            let y = c0 * circles[0].cy() + c1 * circles[1].cy()
+                    + c2 * circles[2].cy() + c3 * circles[3].cy();
+            bezierPoints.push(new Point(x, y));
+        }
+        return bezierPoints;
     }
 }
+
 LensInfo.count = 1;
 
 let lenses = [];
-let circlePoints = {};
-let bezierPoints = [];
 const pointSize = 10;
 
 let mainPlane = SVG("#main-plane");
@@ -91,94 +172,10 @@ function removeElementIfExists(id) {
         elem.remove();
 }
 
-function add(p1, p2) {
-    return p1 + p2;
-}
-
-function sub(p1, p2) {
-    return p1 - p2;
-}
-
-function pathCalc(path, x, y, operator) {
-    for (let i = 0; i < path.length; i++) {
-        let segment = path[i];
-        if (segment[0] == "H") {
-            path[i][1] = operator(path[i][1], x);
-        }
-        else if (segment[0] == "V") {
-            path[i][1] = operator(path[i][1], y);
-        }
-        else {
-            for (let j = 1; j < segment.length; j += 2) {
-                path[i][j] = operator(path[i][j], x);
-                path[i][j + 1] = operator(path[i][j + 1], y);
-            }
-        }
-    }
-    return path;
-}
-
-function createCircle(lens, cx, cy, id) {
-    let attributes = {
-        cx: cx,
-        cy: cy,
-        fill: "none",
-        stroke: "#189ab4",
-        "stroke-width": 2.5,
-        style: "cursor: pointer",
-        id: id
-    };
-    let circle = mainPlane.circle(pointSize).attr(attributes);
-    circle.draggable();
-    circle.on('dragmove.namespace', circleDrag);
-    lens.pushCircle(circle);
-}
-
-function createPointsForLens(lens) {
-    let lensId = lens.id;
-    let pathD = lens.path.pathD;
-    let cx, cy, segment, circleIdx;
-
-    for (let i = 0; i < pathD.length; i++) {
-        if (pathD[i][0] == "M") {
-            circleIdx = 1;
-            segment = "back-";
-            cx = pathD[i][1];
-            cy = pathD[i][2];
-            createCircle(lens, cx, cy, lensId+"-circle-"+segment + circleIdx++);
-        }
-        else if (pathD[i][0] == "C") {
-            segment = i == lens.path.backCurveIdx ? "back-" : "front-";
-            for (let j = 1; j < pathD[i].length; j += 2) {
-                cx = pathD[i][j];
-                cy = pathD[i][j + 1];
-                createCircle(lens, cx, cy, lensId+"-circle-"+segment + circleIdx++);
-            }
-        }
-        else if (pathD[i][0] == "H" && i != pathD.length - 1) {
-            circleIdx = 1;
-            segment = segment == "back-" ? "front-" : "back-";
-            cx = pathD[i][1];
-            createCircle(lens, cx, cy, lensId+"-circle-"+segment + circleIdx++);
-        }
-        else if (pathD[i][0] == "V" && i != pathD.length - 1) {
-            cy = pathD[i][1];
-            createCircle(lens, cx, cy, lensId+"-circle-"+segment + circleIdx++);
-        }
-        else if (pathD[i][0] == "L" && i != pathD.length - 1) {
-            circleIdx = 1;
-            segment = segment == "back-" ? "front-" : "back-";
-            cx = pathD[i][1];
-            cy = pathD[i][2];
-            createCircle(lens, cx, cy, lensId+"-circle-"+segment + circleIdx++);
-        }
-    }
-}
-
 // eslint-disable-next-line no-unused-vars
 function createLens(event) {
     let mainPlaneElem = document.getElementById("main-plane");
-    let yOffset = mainPlaneElem.getBoundingClientRect().y;
+    const yOffset = mainPlaneElem.getBoundingClientRect().y;
     let x = event.clientX;
     let y = event.clientY - yOffset;
 
@@ -207,31 +204,30 @@ function createLens(event) {
         order = [1, 3, 2, 4];
     }
     lens = new LensInfo(lensId);
-    
-    let xDiff = midPoint.x - x;
-    let yDiff = midPoint.y - y;
-    pathCalc(pathD, xDiff, yDiff, sub);
     lens.setPath(pathD, ...order);
 
     attr.id = lens.path.id;
-    createPointsForLens(lens);
+    let path = mainPlane.path(pathD).attr(attr);
+    path.move(x - midPoint.x, y - midPoint.y);
+    lens.path.updatePathD(path.array());
+    lens.createPoints();
     lenses.push(lens);
 
-    let path = mainPlane.path(pathD).attr(attr);
     prevCoords.setVals(x, y);
 
     mainPlaneElem.addEventListener("mousemove", mouseMoveLens, false);
     mainPlaneElem.addEventListener("mouseup", mouseUpLens, false);
 
     function mouseMoveLens(event) {
-        let pathD = path.array();
         let x = event.clientX;
         let y = event.clientY - yOffset;
+        if (x < 150)
+            x = 150;
         let xDiff = x - prevCoords.x;
         let yDiff = y - prevCoords.y;
 
-        pathCalc(pathD, xDiff, yDiff, add);
-        path.plot(pathD);
+        path.move(x - midPoint.x, y - midPoint.y);
+        lens.path.updatePathD(path.array());
 
         prevCoords.setVals(x, y);
 
@@ -248,6 +244,40 @@ function createLens(event) {
     function mouseUpLens() {
         mainPlaneElem.removeEventListener("mousemove", mouseMoveLens, false);
         mainPlaneElem.removeEventListener("mouseup", mouseUpLens, false);
+    }
+}
+
+
+// eslint-disable-next-line no-unused-vars
+function createLaser(event) {
+    let mainPlaneElem = document.getElementById("main-plane");
+    const yOffset = mainPlaneElem.getBoundingClientRect().y;
+    let x = event.clientX;
+    let y = event.clientY - yOffset;
+    const rectW = 44, rectH = 10;
+    const rayW = mainPlane.width() * 1.5;
+    let rect = mainPlane.rect(rectW, rectH).fill("#211414").rx(2).move(x, y);
+    let rayX = x + rectW, rayY = y + rectH / 2;
+    let ray = mainPlane.line(rayX, rayY, rayX + rayW, rayY).stroke({ "color": "#FC0000" });
+    let stripX = x + rectW - 8.5;
+    let strip = mainPlane.line(stripX, y + rectH, stripX, y).stroke({ "color": "white"});
+
+    mainPlaneElem.addEventListener("mousemove", mouseMoveLaser, false);
+    mainPlaneElem.addEventListener("mouseup", mouseUpLaser, false);
+
+    function mouseMoveLaser(event) {
+        let x = event.clientX;
+        let y = event.clientY - yOffset;
+        rect.move(x - 0.5 * rectW, y - 0.5 * rectH);
+        let rayX = rect.x() + rectW, rayY = y;
+        ray.move(rayX, rayY);
+        let stripX = rect.x() + rectW - 8.5;
+        strip.move(stripX, rect.y());
+    }
+
+    function mouseUpLaser() {
+        mainPlaneElem.removeEventListener("mousemove", mouseMoveLaser, false);
+        mainPlaneElem.removeEventListener("mouseup", mouseUpLaser, false);
     }
 }
 
@@ -281,7 +311,7 @@ function circleDrag(event) {
     let yDiff = y - event.target.instance.y();
 
     handler.move(x, y);
-    
+
     // get center of a mouse click
     x += box.w / 2;
     y += box.h / 2;
@@ -293,7 +323,7 @@ function circleDrag(event) {
 }
 
 function moveAdjacent(cx, cy, circleId, lens, xDiff, yDiff) {
-    let adjCurveIdx, adjPointIdx, adjCircleIdx; 
+    let adjCurveIdx, adjPointIdx, adjCircleIdx;
     let curveIdx;
     let curve = circleId[3];
     let circleIdx = circleId[4];
@@ -309,7 +339,7 @@ function moveAdjacent(cx, cy, circleId, lens, xDiff, yDiff) {
         else {
             adjCurveIdx = path.topLineIdx > 0 ? path.botLineIdx : lens.backCurveIdx;
         }
-        adjPointIdx = path.getSegmentLengthInPoints(adjCurveIdx);        
+        adjPointIdx = path.getSegmentLengthInPoints(adjCurveIdx);
         if (adjPointIdx < 0) {
             console.error("adjPointIdx < 0: ", adjPointIdx);
             return;
@@ -333,52 +363,3 @@ function moveAdjacent(cx, cy, circleId, lens, xDiff, yDiff) {
     path.setSegmentPoint(adjCurveIdx, adjPointIdx, cx, cy);
     path.plot();
 }
-
-function calcBezierPoints(pointsLength) {
-    bezierPoints = [];
-    let dt = 0.01;
-    if (pointsLength == 3) {
-        for (let t = 0; t < 1; t += dt) {
-            let c1 = (1 - t) * (1 - t);
-            let c2 = 2 * t * (1 - t);
-            let c3 = t * t;
-
-            let x = c1 * circlePoints[1].x + c2 * circlePoints[2].x 
-                    + c3 * circlePoints[3].x;
-            let y = c1 * circlePoints[1].y + c2 * circlePoints[2].y 
-                    + c3 * circlePoints[3].y;
-            bezierPoints.push(new Point(x, y));
-        }
-    }
-    else if (pointsLength == 4) {
-        for (let t = 0; t < 1; t += dt) {
-            let c1 = (1 - t) * (1 - t) * (1 - t);
-            let c2 = 3 * t * (1 - t) * (1 - t);
-            let c3 = 3 * t * t * (1 - t);
-            let c4 = t * t * t;
-
-            let x = c1 * circlePoints[1].x + c2 * circlePoints[2].x 
-                    + c3 * circlePoints[3].x + c4 * circlePoints[4].x;
-            let y = c1 * circlePoints[1].y + c2 * circlePoints[2].y 
-                    + c3 * circlePoints[3].y + c4 * circlePoints[4].y;
-            bezierPoints.push(new Point(x, y));
-        }
-    }
-    else {
-        return;
-    }
-}
-
-// cx 312, 444
-// C 315 434 315 499 352 509
-// cx 312, 444
-// C 315 434 315 499 352 509
-// --------------
-// cx 312, 448
-// xdiff 0, 4
-// C 315 434 315 499 352 509
-// ----------
-// cx 312, 451
-// xdiff 0, 3
-// C 315 434 312 448 352 509
-// -----------
