@@ -71,9 +71,10 @@ class PathInfo {
 }
 
 class LensInfo {
-    constructor(id, midPoint) {
+    constructor(id, midPoint, type) {
         this.id = id + "-" + LensInfo.count++;
         this.midPoint = midPoint;
+        this.type = type;
         this.pathInfo;
         this.circles = [];
         this.bezierPointsBack = [];
@@ -203,6 +204,8 @@ class LensInfo {
 class Laser {
     constructor(x, y) {
         this.id = "laser-" + Laser.count++;
+        this.rays = [];
+
         this.rectW = 44;
         this.rectH = 10;
         this.rayW = mainPlane.width() * 1.5;
@@ -215,8 +218,9 @@ class Laser {
 
         let rayX = x + this.rectW;
         let rayY = y + this.rectH / 2;
-        this.ray = mainPlane.line(rayX, rayY, rayX + this.rayW, rayY)
+        let ray = mainPlane.line(rayX, rayY, rayX + this.rayW, rayY)
                             .stroke({ "color": "#FC0000" });
+        this.addRay(ray);
 
         let stripX = x + this.rectW - 8.5;
         this.strip = mainPlane.line(stripX, y + this.rectH, stripX, y)
@@ -228,11 +232,18 @@ class Laser {
         let rectX = x - 0.5 * this.rectW;
         let rectY = y - 0.5 * this.rectH;
         this.rect.move(rectX, rectY);
+
         let rayX = rectX + this.rectW;
         let rayY = y;
-        this.ray.plot(rayX, rayY, this.ray.width() + rayX, this.ray.height() + rayY);
+        let ray = this.rays[0];
+        ray.plot(rayX, rayY, ray.width() + rayX, ray.height() + rayY);
+
         let stripX = rectX + this.rectW - 8.5;
         this.strip.move(stripX, rectY);
+    }
+
+    addRay(ray) {
+        this.rays.push(ray);
     }
 }
 
@@ -247,27 +258,16 @@ const mainPlane = SVG("#main-plane");
 const mainPlaneElem = document.getElementById("main-plane");
 const yOffset = mainPlaneElem.getBoundingClientRect().y;
 let div = document.getElementById("coords");
-// div.style.position = "absolute";
-// div.style.width = "3px";
-// div.style.height = "3px";
-// div.style.backgroundColor = "black";
-let line = mainPlane.line(0, 0, 0, 0).stroke({ "color": "magenta"});
-let line2 = mainPlane.line(0, 0, 0, 0).stroke({ "color": "cyan"}).id("123");
-let normLine = mainPlane.line(0, 0, 0, 0).stroke({ "color": "green"});
-
-// function removeElementIfExists(id) {
-//     let elem = SVG("#" + id);
-//     if (elem)
-//         elem.remove();
-// }
-
+let normLine = mainPlane.line().stroke({ "color": "green" }).attr({ "stroke-dasharray": "4 2" });
+let normLine2 = mainPlane.line().stroke({ "color": "orange" }).attr({ "stroke-dasharray": "4 2" });
 // eslint-disable-next-line no-unused-vars
 function createLens(event) {
     let x = event.clientX;
     let y = event.clientY - yOffset;
 
-    let midPoint = new Point();
+    let midPoint;
     let pathD, lens, order;
+    let type; // 0 for convex, 1 for concave
 
     let lensId = event.target.id;
 
@@ -279,10 +279,11 @@ function createLens(event) {
             ['C', 90, 135, 90, 70, 50, 0],
             ['L', 30, 0]
         ]);
-        midPoint.setVals(40, 100);
+        midPoint = new Point(40, 100);
         order = [1, 3, 2, 4];
+        type = 0;
     }
-    lens = new LensInfo(lensId, midPoint);
+    lens = new LensInfo(lensId, midPoint, type);
     lens.createPath(pathD, ...order);
 
     let path = lens.pathInfo.path;
@@ -332,10 +333,17 @@ function createLaser(event) {
     }
 }
 
-function laserRefract() {
+function laserRefract(depth=0) {
     if (!laser)
         return;
-    let ray = laser.ray;
+
+    let ray = laser.rays[0];
+    if (depth == 0 || typeof depth == "object") {
+        for (let i = 1; i < laser.rays.length; i++)
+            laser.rays[i].remove();
+        laser.rays = [ray];
+    }
+
     let width = mainPlane.width();
     let x1 = ray.attr("x1");
     let y1 = ray.attr("y1");
@@ -345,6 +353,9 @@ function laserRefract() {
         return;
 
     let lens = lenses[0];
+    if (!lens)
+        return;
+
     const bezierMin = lens.bezierPointsBack[0];
     const bezierMax = lens.bezierPointsBack[lens.bezierPointsBack.length - 1];
     if (bezierMin > bezierMax) {
@@ -358,8 +369,10 @@ function laserRefract() {
     let intersect = false;
 
     if (bezierMin.y > a * (bezierMin.x - x1) + b
-        || bezierMax.y < a * (bezierMax - x1) + b)
+        || bezierMax.y < a * (bezierMax.x - x1) + b) {
+        ray.plot(x1, y1, width, width * a + b);
         return;
+    }
 
     for (let i = 0; i < lens.bezierPointsBack.length - 1; i++) {
         p1 = lens.bezierPointsBack[i];
@@ -379,25 +392,29 @@ function laserRefract() {
 
     ray.plot(x1, y1, intersPointX1, intersPointY1);
 
-    div.innerHTML = `p1.x ${p1.x.toFixed(3)}, p2.x ${p2.x.toFixed(3)},\n`
-                    + `p1.y ${p1.y.toFixed(3)}, p2.y ${p2.y.toFixed(3)},\n`
-                    + `y1 ${y1.toFixed(3)}`;
-
+    // find slope of a tangent and normal line
     let tangent = (p2.y - p1.y) / (p2.x - p1.x);
     let normal = -1 / tangent;
-    let theta1 = Math.atan(Math.abs((normal-a) / (1+normal*a)));
+    // find angle between normal line and ray
+    let theta1 = Math.atan((a-normal) / (1+normal*a));
     let n1 = 1, n2 = 1.5;
+    // find refraction angle
     let sinTheta2 = n1 / n2 * Math.sin(theta1);
-    if (sinTheta2 > 1)
-        sinTheta2 = 1;
     let theta2 = Math.asin(sinTheta2);
-    let normal_angle = Math.atan(normal);
-    let normal_sign = normal_angle < 0;
-    let a_ref_ang = Math.abs(normal_angle) - theta2;
-    let a_refract = Math.tan(a_ref_ang) * (-1) ** normal_sign;
+    // get angle of a normal line
+    let normalAngle = Math.atan(normal);
+    // get angle and slope of a refracted ray
+    let aRefAng = normalAngle + theta2;
+    let aRefract = Math.tan(aRefAng);
+
+    // div.innerHTML = `theta1 ${toDeg(theta1).toFixed(3)}, theta2 ${toDeg(theta2).toFixed(3)},\n`
+    // + `normal_ang ${toDeg(normalAngle).toFixed(3)}, a_ref_ang ${toDeg(aRefAng).toFixed(3)},\n`
+    // + `aRefract ${aRefract.toFixed(3)}`;
+
+    // normLine.plot(intersPointX1+20, 20 * normal + intersPointY1, intersPointX1 - 50, -50 * normal + intersPointY1);
 
     b = intersPointY1;
-    a = a_refract;
+    a = aRefract;
     intersect = false;
 
     for (let i = 0; i < lens.bezierPointsFront.length - 1; i++) {
@@ -409,35 +426,41 @@ function laserRefract() {
         }
     }
 
-    let intersPointX2;
-    let intersPointY2;
+    let line = mainPlane.line().stroke({ "color": "magenta"});
 
-    if (intersect) {
-        intersPointX2 = p1.x;
-        intersPointY2 = a * (p1.x - intersPointX1) + b;
-        line.plot(intersPointX1, intersPointY1, intersPointX2, intersPointY2);
-    }
-    else {
-        line2.plot(intersPointX1, intersPointY1, width,
-                   (width - intersPointX1) * a + intersPointY1);
+    if (!intersect) {
+        line.plot(intersPointX1, intersPointY1, width,
+                  width * a + intersPointY1);
+        laser.addRay(line);
         return;
     }
 
+    let intersPointX2 = p1.x;
+    let intersPointY2 = a * (p1.x - intersPointX1) + b;
+    line.plot(intersPointX1, intersPointY1, intersPointX2, intersPointY2);
+    laser.addRay(line);
+
     tangent = (p2.y - p1.y) / (p2.x - p1.x);
     normal = -1 / tangent;
-    theta1 = Math.atan(Math.abs((normal - a) / (1 + normal*a)));
+    theta1 = Math.atan((a - normal) / (1 + normal*a));
     n1 = 1.5, n2 = 1;
     sinTheta2 = n1 / n2 * Math.sin(theta1);
     if (sinTheta2 > 1)
-        sinTheta2 = 1;
-    theta2 = Math.asin(sinTheta2);
-    normal_angle = Math.atan(normal);
-    normal_sign = normal_angle < 0;
-    a_ref_ang = Math.abs(normal_angle) - theta2;
-    a_refract = Math.tan(a_ref_ang) * (-1) ** normal_sign;
-    normLine.plot(intersPointX2, intersPointY2, intersPointX2 + 50, 50 * normal + intersPointY2);
+        theta2 = Math.PI/2 + sinTheta2 - 1;
+    else if (sinTheta2 < -1)
+        theta2 = -Math.PI/2 + (sinTheta2 + 1);
+    else
+        theta2 = Math.asin(sinTheta2);
+    normalAngle = Math.atan(normal);
+    aRefAng = normalAngle + theta2;
+    aRefract = Math.tan(aRefAng);
 
-    line2.plot(intersPointX2, intersPointY2, width, (width - intersPointX2) * a_refract + intersPointY2);
+    let line2 = mainPlane.line().stroke({ "color": "cyan"});
+    line2.plot(intersPointX2, intersPointY2, width, width * aRefract + intersPointY2);
+    laser.addRay(line2);
+
+    // normLine2.plot(intersPointX2+50, 50 * normal + intersPointY2, intersPointX2 - 50, -50 * normal + intersPointY2);
+
     function toDeg(rad) {
         return rad * 180 / Math.PI;
     }
