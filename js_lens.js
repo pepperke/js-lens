@@ -38,7 +38,7 @@ class PathInfo {
             console.error("getSegmentPoint: wrong segment index: ", segmentIdx);
             return null;
         }
-        if (pointIdx < 1 || pointIdx >= (pathD[segmentIdx].length + 1) / 2) {
+        if (pointIdx < 1 || pointIdx >= (pathD[segmentIdx].length + 1) * 0.5) {
             console.error("getSegmentPoint: wrong point index: ", pointIdx);
             return null;
         }
@@ -52,7 +52,7 @@ class PathInfo {
             console.error("setSegmentPoint: wrong segment index: ", segmentIdx);
             return;
         }
-        if (pointIdx < 1 || pointIdx >= (pathD[segmentIdx].length + 1) / 2) {
+        if (pointIdx < 1 || pointIdx >= (pathD[segmentIdx].length + 1) * 0.5) {
             console.error("setSegmentPoint: wrong point index: ", pointIdx);
             return;
         }
@@ -66,15 +66,14 @@ class PathInfo {
             console.error("setSegmentPoint: wrong segment index: ", segmentIdx);
             return -1;
         }
-        return parseInt(pathD[segmentIdx].length - 1) / 2;
+        return parseInt(pathD[segmentIdx].length - 1) * 0.5;
     }
 }
 
 class LensInfo {
-    constructor(id, midPoint, type) {
+    constructor(id, midPoint) {
         this.id = id + "-" + LensInfo.count++;
         this.midPoint = midPoint;
-        this.type = type;
         this.pathInfo;
         this.circles = [];
         this.bezierPointsBack = [];
@@ -194,8 +193,8 @@ class LensInfo {
             let cx = circles[i].cx();
             let cy = circles[i].cy();
 
-            circles[i].move(cx + xDiff - pointSize / 2,
-                            cy + yDiff - pointSize / 2);
+            circles[i].move(cx + xDiff - pointSize * 0.5,
+                            cy + yDiff - pointSize * 0.5);
         }
         this.calcBezierPoints();
     }
@@ -206,44 +205,72 @@ class Laser {
         this.id = "laser-" + Laser.count++;
         this.rays = [];
 
-        this.rectW = 44;
-        this.rectH = 10;
+        this.bodyW = 44;
+        this.bodyH = 10;
         this.rayW = mainPlane.width() * 1.5;
-        this.rect = mainPlane.rect(this.rectW, this.rectH).fill("#211414")
-                             .rx(2).move(x, y).id(this.id)
+        this.body = mainPlane.line(x, y + this.bodyH*0.5, x + this.bodyW, y + this.bodyH*0.5)
+                             .stroke({ color: "#211414", width: this.bodyH })
+                             .id(this.id)
                              .attr({style: "cursor: pointer"});
 
-        this.rect.draggable();
-        this.rect.on("dragmove.namespace", laserDrag);
+        this.body.draggable();
+        this.body.on("dragmove.namespace", laserDrag);
 
-        let rayX = x + this.rectW;
-        let rayY = y + this.rectH / 2;
+        let rayX = x + this.bodyW;
+        let rayY = y + this.bodyH * 0.5;
         let ray = mainPlane.line(rayX, rayY, rayX + this.rayW, rayY)
-                            .stroke({ "color": "#FC0000" });
+                           .stroke({ "color": "#FC0000" });
         this.addRay(ray);
 
-        let stripX = x + this.rectW - 8.5;
-        this.strip = mainPlane.line(stripX, y + this.rectH, stripX, y)
+        let stripX = x + this.bodyW - 8.5;
+        this.strip = mainPlane.line(stripX, y + this.bodyH, stripX, y)
                               .stroke({ "color": "white"});
 
     }
 
+    getLineCoords(line) {
+        let x1 = line.attr("x1");
+        let y1 = line.attr("y1");
+        let x2 = line.attr("x2");
+        let y2 = line.attr("y2");
+        return [x1, y1, x2, y2];
+    }
+
     move(x, y) {
-        let rectX = x - 0.5 * this.rectW;
-        let rectY = y - 0.5 * this.rectH;
-        this.rect.move(rectX, rectY);
+        let [bodyX1, bodyY1, bodyX2, bodyY2] = this.getLineCoords(this.body);
 
-        let rayX = rectX + this.rectW;
-        let rayY = y;
+        let bodyX = (bodyX1 + bodyX2) / 2;
+        let bodyY = (bodyY1 + bodyY2) / 2;
+        let xDiff = x - bodyX;
+        let yDiff = y - bodyY;
+
+        this.body.plot(bodyX1 + xDiff, bodyY1 + yDiff,
+                       bodyX2 + xDiff, bodyY2 + yDiff);
+
         let ray = this.rays[0];
-        ray.plot(rayX, rayY, ray.width() + rayX, ray.height() + rayY);
+        let [rayX1, rayY1, rayX2, rayY2] = this.getLineCoords(ray);
+        ray.plot(rayX1 + xDiff, rayY1 + yDiff, rayX2 + xDiff, rayY2 + yDiff);
 
-        let stripX = rectX + this.rectW - 8.5;
-        this.strip.move(stripX, rectY);
+        let [stripX1, stripY1, stripX2, stripY2] = this.getLineCoords(this.strip);
+        this.strip.plot(stripX1 + xDiff, stripY1 + yDiff,
+                        stripX2 + xDiff, stripY2 + yDiff);
     }
 
     addRay(ray) {
         this.rays.push(ray);
+    }
+
+    rotate(x, y, angle) {
+        let bodyCoords = rotateLine(this.body, angle, x, y);
+        this.body.plot(...bodyCoords);
+
+        let ray = this.rays[0];
+        let [rayX1, rayY1, rayX2, rayY2] = rotateLine(ray, angle, x, y);
+
+        let stripCoords = rotateLine(this.strip, angle, x, y);
+        this.strip.plot(...stripCoords);
+
+        ray.plot(rayX1, rayY1, rayX2, rayY2);
     }
 }
 
@@ -260,6 +287,7 @@ const yOffset = mainPlaneElem.getBoundingClientRect().y;
 let div = document.getElementById("coords");
 let normLine = mainPlane.line().stroke({ "color": "green" }).attr({ "stroke-dasharray": "4 2" });
 let normLine2 = mainPlane.line().stroke({ "color": "orange" }).attr({ "stroke-dasharray": "4 2" });
+// let point = mainPlane.rect(20,20).fill("magenta");
 // eslint-disable-next-line no-unused-vars
 function createLens(event) {
     let x = event.clientX;
@@ -267,7 +295,6 @@ function createLens(event) {
 
     let midPoint;
     let pathD, lens, order;
-    let type; // 0 for convex, 1 for concave
 
     let lensId = event.target.id;
 
@@ -281,9 +308,8 @@ function createLens(event) {
         ]);
         midPoint = new Point(40, 100);
         order = [1, 3, 2, 4];
-        type = 0;
     }
-    lens = new LensInfo(lensId, midPoint, type);
+    lens = new LensInfo(lensId, midPoint);
     lens.createPath(pathD, ...order);
 
     let path = lens.pathInfo.path;
@@ -295,6 +321,9 @@ function createLens(event) {
     lens.calcBezierPoints();
     lenses.push(lens);
 
+    if (laser)
+        laserRefract();
+
     mainPlaneElem.addEventListener("mousemove", mouseMoveLens, false);
     mainPlaneElem.addEventListener("mouseup", mouseUpLens, false);
 
@@ -302,6 +331,8 @@ function createLens(event) {
         let x = event.clientX;
         let y = event.clientY - yOffset;
         lens.move(x, y);
+        if (laser)
+            laserRefract();
     }
 
     function mouseUpLens() {
@@ -319,6 +350,7 @@ function createLaser(event) {
     mainPlaneElem.addEventListener("mousemove", mouseMoveLaser, false);
     mainPlaneElem.addEventListener("mousemove", laserRefract, false);
     mainPlaneElem.addEventListener("mouseup", mouseUpLaser, false);
+    mainPlaneElem.addEventListener("wheel", laserRotate, false);
 
     function mouseMoveLaser(event) {
         let x = event.clientX;
@@ -407,10 +439,6 @@ function laserRefract(depth=0) {
     let aRefAng = normalAngle + theta2;
     let aRefract = Math.tan(aRefAng);
 
-    // div.innerHTML = `theta1 ${toDeg(theta1).toFixed(3)}, theta2 ${toDeg(theta2).toFixed(3)},\n`
-    // + `normal_ang ${toDeg(normalAngle).toFixed(3)}, a_ref_ang ${toDeg(aRefAng).toFixed(3)},\n`
-    // + `aRefract ${aRefract.toFixed(3)}`;
-
     // normLine.plot(intersPointX1+20, 20 * normal + intersPointY1, intersPointX1 - 50, -50 * normal + intersPointY1);
 
     b = intersPointY1;
@@ -426,7 +454,7 @@ function laserRefract(depth=0) {
         }
     }
 
-    let line = mainPlane.line().stroke({ "color": "magenta"});
+    let line = mainPlane.line().stroke({ "color": "red"});
 
     if (!intersect) {
         line.plot(intersPointX1, intersPointY1, width,
@@ -446,16 +474,16 @@ function laserRefract(depth=0) {
     n1 = 1.5, n2 = 1;
     sinTheta2 = n1 / n2 * Math.sin(theta1);
     if (sinTheta2 > 1)
-        theta2 = Math.PI/2 + sinTheta2 - 1;
+        theta2 = Math.PI * 0.5 + sinTheta2 - 1;
     else if (sinTheta2 < -1)
-        theta2 = -Math.PI/2 + (sinTheta2 + 1);
+        theta2 = -Math.PI * 0.5 + (sinTheta2 + 1);
     else
         theta2 = Math.asin(sinTheta2);
     normalAngle = Math.atan(normal);
     aRefAng = normalAngle + theta2;
     aRefract = Math.tan(aRefAng);
 
-    let line2 = mainPlane.line().stroke({ "color": "cyan"});
+    let line2 = mainPlane.line().stroke({ "color": "red"});
     line2.plot(intersPointX2, intersPointY2, width, width * aRefract + intersPointY2);
     laser.addRay(line2);
 
@@ -465,27 +493,16 @@ function laserRefract(depth=0) {
         return rad * 180 / Math.PI;
     }
 }
-//     function rotateOnScroll(event) {
-//         let lineCoords = line.array();
-//         let x = event.clientX;
-//         let y = event.clientY - yOffset;
-//         let yTop = lineCoords[0][1] - y;
-//         let xTop = lineCoords[0][0] - x;
-//         let yBot = lineCoords[1][1] - y;
-//         let xBot = lineCoords[1][0] - x;
-//         let angle = 2 / 180 * Math.PI;
-//         angle = event.deltaY < 0 ? angle : -angle;
 
-//         let newXTop = xTop * Math.cos(angle) - yTop * Math.sin(angle) + x;
-//         let newYTop = xTop * Math.sin(angle) + yTop * Math.cos(angle) + y;
-//         let newXBot = xBot * Math.cos(angle) - yBot * Math.sin(angle) + x;
-//         let newYBot = xBot * Math.sin(angle) + yBot * Math.cos(angle) + y;
+function laserRotate(event) {
+    let x = event.clientX;
+    let y = event.clientY - yOffset;
+    let angle = 2;
+    angle = event.deltaY < 0 ? angle : -angle;
 
-//         if (newYTop > newYBot) {
-//             [newXTop, newYTop, newXBot, newYBot] = [newXBot, newYBot, newXTop, newYTop];
-//         }
-//         line.plot(newXTop, newYTop, newXBot, newYBot);
-//     }
+    laser.rotate(x, y, angle / 180 * Math.PI);
+    laserRefract();
+}
 
 function circleDrag(event) {
     const { handler, box } = event.detail;
@@ -497,8 +514,8 @@ function circleDrag(event) {
     handler.move(x, y);
 
     // get center of a mouse click
-    x += box.w / 2;
-    y += box.h / 2;
+    x += box.w * 0.5;
+    y += box.h * 0.5;
 
     let circleId = event.currentTarget.id.split("-");
     let lensId = circleId[0] + "-" + circleId[1];
@@ -542,7 +559,7 @@ function moveAdjacent(cx, cy, circleId, lens, xDiff, yDiff) {
         let adjCircle = lens.circles.find(c => c.id() == adjCircleId);
         let adjCx = adjCircle.cx() + xDiff;
         let adjCy = adjCircle.cy() + yDiff;
-        adjCircle.move(adjCx - pointSize / 2, adjCy - pointSize / 2);
+        adjCircle.move(adjCx - pointSize * 0.5, adjCy - pointSize * 0.5);
         pathInfo.setSegmentPoint(curveIdx, adjCircleIdx - 1, adjCx, adjCy);
     }
     pathInfo.setSegmentPoint(adjCurveIdx, adjPointIdx, cx, cy);
@@ -556,8 +573,8 @@ function laserDrag(event) {
     const box = event.detail.box;
     let { x, y } = box;
 
-    x += box.w / 2;
-    y += box.h / 2;
+    x += box.w * 0.5;
+    y += box.h * 0.5;
 
     laser.move(x, y);
     laserRefract();
@@ -568,10 +585,24 @@ function lensDrag(event) {
     const box = event.detail.box;
     let { x, y } = box;
 
-    x += box.w / 2;
-    y += box.h / 2;
+    x += box.w * 0.5;
+    y += box.h * 0.5;
 
     let lens = lenses.find(lens => lens.id == event.target.instance.id().slice(0, -5));
     lens.move(x, y);
     laserRefract();
+}
+
+function rotateLine(line, angle, cx, cy) {
+    let x1 = line.attr("x1") - cx;
+    let y1 = line.attr("y1") - cy;
+    let x2 = line.attr("x2") - cx;
+    let y2 = line.attr("y2") - cy;
+
+    let newX1 = x1 * Math.cos(angle) - y1 * Math.sin(angle) + cx;
+    let newY1 = x1 * Math.sin(angle) + y1 * Math.cos(angle) + cy;
+    let newX2 = x2 * Math.cos(angle) - y2 * Math.sin(angle) + cx;
+    let newY2 = x2 * Math.sin(angle) + y2 * Math.cos(angle) + cy;
+
+    return [newX1, newY1, newX2, newY2];
 }
