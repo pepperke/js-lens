@@ -265,12 +265,12 @@ class Laser {
         this.body.plot(...bodyCoords);
 
         let ray = this.rays[0];
-        let [rayX1, rayY1, rayX2, rayY2] = rotateLine(ray, angle, x, y);
+        let rayCoords = rotateLine(ray, angle, x, y);
+        let a = (rayCoords[3] - rayCoords[1])/ (rayCoords[2] - rayCoords[0]);
+        ray.plot(...rayCoords);
 
         let stripCoords = rotateLine(this.strip, angle, x, y);
         this.strip.plot(...stripCoords);
-
-        ray.plot(rayX1, rayY1, rayX2, rayY2);
     }
 }
 
@@ -377,10 +377,8 @@ function laserRefract(depth=0) {
     }
 
     let width = mainPlane.width();
-    let x1 = ray.attr("x1");
-    let y1 = ray.attr("y1");
-    let x2 = ray.attr("x2");
-    let y2 = ray.attr("y2");
+    let {x1, y1, x2, y2} = ray.attr(["x1", "y1", "x2", "y2"]);
+
     if (!lenses)
         return;
 
@@ -402,7 +400,7 @@ function laserRefract(depth=0) {
 
     if (bezierMin.y > a * (bezierMin.x - x1) + b
         || bezierMax.y < a * (bezierMax.x - x1) + b) {
-        ray.plot(x1, y1, width, width * a + b);
+        ray.plot(x1, y1, width, (width - x1) * a + b);
         return;
     }
 
@@ -458,7 +456,7 @@ function laserRefract(depth=0) {
 
     if (!intersect) {
         line.plot(intersPointX1, intersPointY1, width,
-                  width * a + intersPointY1);
+                  (width - intersPointX1) * a + intersPointY1);
         laser.addRay(line);
         return;
     }
@@ -484,7 +482,8 @@ function laserRefract(depth=0) {
     aRefract = Math.tan(aRefAng);
 
     let line2 = mainPlane.line().stroke({ "color": "red"});
-    line2.plot(intersPointX2, intersPointY2, width, width * aRefract + intersPointY2);
+    line2.plot(intersPointX2, intersPointY2, width,
+               (width - intersPointX2) * aRefract + intersPointY2);
     laser.addRay(line2);
 
     // normLine2.plot(intersPointX2+50, 50 * normal + intersPointY2, intersPointX2 - 50, -50 * normal + intersPointY2);
